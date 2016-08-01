@@ -1,5 +1,9 @@
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Random;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -10,10 +14,6 @@ public class DAI implements DAN.DAN2DAI {
 	static DAI dai = new DAI();
 	static IDA ida = new IDA();
     static DAN dan = new DAN();
-    static String d_name = "Dandelion001";
-    static String d_id = "get_mac_addr";
-    static String u_name = "yb";
-    static Boolean is_sim = false;
 	
 	static abstract class DF {
         public DF (String name) {
@@ -47,7 +47,7 @@ public class DAI implements DAN.DAN2DAI {
     static ArrayList<DF> df_list = new ArrayList<DF>();
     static ArrayList<Command> cmd_list = new ArrayList<Command>();
     static boolean suspended = true;
-
+    static final String config_filename = "config.txt";
     
     static void add_df (DF... dfs) {
         for (DF df: dfs) {
@@ -244,6 +244,26 @@ public class DAI implements DAN.DAN2DAI {
         }
 	}
 	
+	
+   static private String get_config_ec () {
+        try {
+            /* assume that the config file has only one line,
+             *  which is the IP address of the EC (without port number)*/
+            BufferedReader br = new BufferedReader(new FileReader(config_filename));
+            try {
+                String line = br.readLine();
+                if (line != null) {
+                    return line;
+                }
+                return "localhost";
+            } finally {
+                br.close();
+            }
+        } catch (IOException e) {
+            return "localhost";
+        }
+    }
+	
 
     /* The main() function */
     public static void main(String[] args) {
@@ -258,14 +278,30 @@ public class DAI implements DAN.DAN2DAI {
         for(int i = 0; i < df_list.size(); i++) {
             df_name_list.put(df_list.get(i).name);
         }
+        
+        String endpoint = get_config_ec();
+        if (!endpoint.startsWith("http://")) {
+            endpoint = "http://" + endpoint;
+        }
+        if (endpoint.length() - endpoint.replace(":", "").length() == 1) {
+            endpoint += ":9999";
+        }
+        
         JSONObject profile = new JSONObject() {{
-            put("d_name", d_name);
-            put("dm_name", "Bulb"); //deleted
-            put("u_name", u_name);
+            put("dm_name", dm_name); //deleted
+            put("u_name", "yb");
             put("df_list", df_name_list);
-            put("is_sim", is_sim);
+            put("is_sim", false);
         }};
-        dan.init("http://localhost:9999", d_id , profile, dai);
+        
+        String d_id = "";
+        Random rn = new Random();
+        for (int i = 0; i < 12; i++) {
+            int a = rn.nextInt(16);
+            d_id += "0123456789ABCDEF".charAt(a);
+        }
+
+        dan.init(dai, endpoint, d_id, profile);
         dai.add_shutdownhook();
 
         /* Performs the functionality of the IDA */
@@ -274,6 +310,7 @@ public class DAI implements DAN.DAN2DAI {
     
     /*--------------------------------------------------*/
     /* Customizable part */
+    static String dm_name = "Bulb";
     
     static class Scale extends ODF {
         public Scale () {
