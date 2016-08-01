@@ -1,247 +1,404 @@
-import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
-import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
-import java.util.Random;
+import java.util.ArrayList;
+import java.util.HashMap;
 
 import org.json.JSONArray;
-import org.json.JSONException;
 import org.json.JSONObject;
 
-import DAN.DAN;
-import DAN.DAN.ODFObject;
+import processing.core.PApplet;
+@SuppressWarnings("serial")
+public class DAI implements DAN.DAN2DAI {
+	static DAI dai = new DAI();
+	static IDA ida = new IDA();
+    static DAN dan = new DAN();
+    static String d_name = "Dandelion001";
+    static String d_id = "get_mac_addr";
+    static String u_name = "yb";
+    static Boolean is_sim = false;
+	
+	static abstract class DF {
+        public DF (String name) {
+            this.name = name;
+        }
+        public String name;
+        public boolean selected;
+    }
+	
+	static abstract class IDF extends DF {
+        public IDF (String name) {
+            super(name);
+        }
+    }
+	
+    static abstract class ODF extends DF {
+        public ODF (String name) {
+            super(name);
+        }
+        abstract public void pull(JSONArray data);
+    }
+    
+    static abstract class Command {
+        public Command(String name) {
+            this.name = name;
+        }
+        public String name;
+        abstract public void run(JSONArray dl_cmd_params, JSONArray ul_cmd_params);
+    }
+    
+    static ArrayList<DF> df_list = new ArrayList<DF>();
+    static ArrayList<Command> cmd_list = new ArrayList<Command>();
+    static boolean suspended = true;
 
-public class DAI {
-	static final IDAManager dandelion_ida_manager =  new DandelionIDAManager();
-	static final IDAManager.Subscriber ida_event_subscriber = new IDAEventSubscriber();
-	static String dm_name;
-	static String[] df_list;
-
-	public static void init(String arg_dm_name, String[] arg_df_list) {
-	    logging(DAN.version);
-	    dm_name = arg_dm_name;
-	    df_list = arg_df_list;
-		dandelion_ida_manager.subscribe(ida_event_subscriber);
-		dandelion_ida_manager.search();
+    
+    static void add_df (DF... dfs) {
+        for (DF df: dfs) {
+            df_list.add(df);
+        }
+    }
+    
+    static void add_command (Command... cmds) {
+        for (Command cmd: cmds) {
+            cmd_list.add(cmd);
+        }
+    }
+    
+    private static boolean is_selected(String df_name) {
+        for (DF df: df_list) {
+            if (df_name.equals(df.name)) {
+                return df.selected;
+            }
+        }
+        System.out.println("Device feature" + df_name + "is not found");
+        return false;
+    }
+ 
+    private static Command get_cmd(String cmd_name) {
+        for(Command cmd: cmd_list) {
+            if(cmd_name.equals(cmd.name) || cmd_name.equals(cmd.name + "_RSP")) {
+                return cmd;
+            }
+        }
+        System.out.println("Command" + cmd_name + "is not found");
+        return null;
+    }
+    
+    private static DF get_df(String df_name) {
+        for(DF df: df_list) {
+            if(df_name.equals(df.name)) {
+                return df;
+            }
+        }
+        System.out.println("Device feature" + df_name + "is not found");
+        return null;
+    }
+    
+    
+    /* Default command-1: SET_DF_STATUS */
+    static class SET_DF_STATUS extends Command {
+        public SET_DF_STATUS() {
+            super("SET_DF_STATUS");
+        }
+        public void run(final JSONArray df_status_list,
+                         final JSONArray updated_df_status_list) {
+            if(df_status_list != null && updated_df_status_list == null) {
+            	final String flags = df_status_list.getString(0);
+                for(int i = 0; i < flags.length(); i++) {
+                    if(flags.charAt(i) == '0') {
+                        df_list.get(i).selected = false;
+                    } else {
+                        df_list.get(i).selected = true;
+                    }
+                }
+	            get_cmd("SET_DF_STATUS_RSP").run(
+            		null,
+            		new JSONArray(){{
+		            	put(flags);
+		            }}
+        		);
+            }
+            else if(df_status_list == null && updated_df_status_list != null) {
+            	dan.push(
+                		"Control",
+                		new JSONArray(){{
+    	                	put("SET_DF_STATUS_RSP");
+    	                	put(new JSONObject(){{
+    	                		put("cmd_params", updated_df_status_list);
+    	                	}});
+                		}}
+            		);
+            } else {
+                System.out.println("Both the df_status_list and the updated_df_status_list are null");
+            }
+        }
+    }
+    /* Default command-2: RESUME */
+    static class RESUME extends Command {
+        public RESUME() {
+            super("RESUME");
+        }
+        public void run(final JSONArray dl_cmd_params,
+                         final JSONArray exec_result) {
+            if(dl_cmd_params != null && exec_result == null) {
+            	suspended = false;
+                get_cmd("RESUME_RSP").run(
+                	null, 
+                	new JSONArray(){{
+                	    put("OK");
+	            }});
+            }
+            else if(dl_cmd_params == null && exec_result != null) {
+            	dan.push(
+                		"Control",
+                		new JSONArray(){{
+    	                	put("RESUME_RSP");
+    	                	put(new JSONObject(){{
+    	                		put("cmd_params", exec_result);
+    	                	}});
+                		}}
+            		);
+            } else {
+            	System.out.println("Both the dl_cmd_params and the exec_result are null!");
+            }
+        }
+    }
+    /* Default command-3: SUSPEND */
+    static class SUSPEND extends Command {
+        public SUSPEND() {
+            super("SUSPEND");
+        }
+        public void run(JSONArray dl_cmd_params,
+                         final JSONArray exec_result) {
+            if(dl_cmd_params != null && exec_result == null) {
+            	suspended = true;
+                get_cmd("SUSPEND_RSP").run(
+                	null, 
+                	new JSONArray(){{
+                		put("OK");
+    	        }});
+            }
+            else if(dl_cmd_params == null && exec_result != null) {
+            	dan.push(
+                		"Control",
+                		new JSONArray(){{
+    	                	put("SUSPEND_RSP");
+    	                	put(new JSONObject(){{
+    	                		put("cmd_params", exec_result);
+    	                	}});
+                		}}
+            		);
+            } else {
+            	System.out.println("Both the dl_cmd_params and the exec_result are null!");
+            }
+        }
+    }
+    
+	public void add_shutdownhook() {
+		Runtime.getRuntime().addShutdownHook(new Thread () {
+            @Override
+            public void run () {
+            	deregister();
+            }
+        });
 	}
 	
-	static class DandelionIDAManager implements IDAManager {
-		IDAManager.Subscriber subscriber;
-		
-		class DandelionIDA extends IDAManager.IDA {
-			public String name;
-
-	        public DandelionIDA (String name) {
-	            this.name = name;
-	        }
-
-	        @Override
-	        public boolean equals (Object obj) {
-	            if (!(obj instanceof IDA)) {
-	                return false;
-	            }
-
-	            DandelionIDA another = (DandelionIDA) obj;
-	            if (this.name == null) {
-	                return false;
-	            }
-	            return this.name.equals(another.name);
-	        }
-		}
-
-		@Override
-		public void search() {
-			subscriber.on_event(IDAManager.Event.FOUND_NEW_IDA, new DandelionIDA(dm_name));
-		}
-
-		@Override
-		public void stop_searching() {}
-
-		@Override
-		public void connect(IDA ida) {
-			subscriber.on_event(IDAManager.Event.CONNECTED, ida);
-		}
-
-		@Override
-		public void write(byte[] command) {
-			IDACommand ida_command = IDACommand.fromBytes(command);
-			String feature = ida_command.feature;
-			double data = ida_command.data;
-			
-			for (String df_name: df_list) {
-			    if (feature.equals(df_name)) {
-			        Bulb.write(feature, (float) data);
-			        return;
-			    }
-			}
-            handle_error("Feature '"+ feature +"' not found");
-		}
-
-		@Override
-		public void disconnect() {}
-
-		@Override
-		public void subscribe(Subscriber s) {
-			subscriber = s;
-		}
-
-		@Override
-		public void unsubscribe(Subscriber s) {
-			subscriber = null;
-		}
+	/* deregister() */
+	public void deregister() {
+		dan.deregister();
 	}
 	
-	static class IDAEventSubscriber implements IDAManager.Subscriber {
-		@Override
-		public void on_event(IDAManager.Event event_tag, Object message) {
-			switch (event_tag) {
-			case FOUND_NEW_IDA:
-				dandelion_ida_manager.connect((DandelionIDAManager.DandelionIDA)message);
-				break;
-			case CONNECTED:
-				DAN.Subscriber dan_event_subscriber = new DANEventSubscriber();
-				DAN.init(dm_name, dan_event_subscriber);
-				JSONObject profile = new JSONObject();
-				try {
-					profile.put("d_name", dm_name +"001");
-					profile.put("dm_name", dm_name);
-					JSONArray feature_list = new JSONArray();
-					for (String df_name: df_list) {
-					    feature_list.put(df_name);
-					}
-					profile.put("df_list", feature_list);
-					profile.put("u_name", "yb");
-					profile.put("is_sim", false);
-					DAN.register("http://localhost:9999", dm_name +"001", profile);
-				} catch (JSONException e) {
-					e.printStackTrace();
-				}
-
-				Runtime.getRuntime().addShutdownHook(new Thread () {
-					@Override
-					public void run () {
-						//logging("shutdown hook");
-						DAN.deregister();
-						dandelion_ida_manager.disconnect();
-					}
-				});
-				break;
-			default:
-				handle_error("Events other than FOUND_NEW_IDA and CONNECTED are invalid");
-				break;
-			}
-		}
+	@Override
+	public void pull(final String odf_name, final JSONArray data) {
+		if (odf_name.equals("Control")) {
+            final String cmd_name = data.getString(0);
+            JSONArray dl_cmd_params = data.getJSONObject(1).getJSONArray("cmd_params");
+            Command cmd = get_cmd(cmd_name);
+            if (cmd != null) {
+                cmd.run(dl_cmd_params, null);
+                return;
+            }
+            
+            /* Reports the exception to IoTtalk*/
+            dan.push("Control", new JSONArray(){{
+            	put("UNKNOWN_COMMAND");
+            	put(new JSONObject(){{
+            		put("cmd_params", new JSONArray(){{
+            			put(cmd_name);
+            		}});
+            	}});
+            }});
+        } else {
+        	ODF odf = ((ODF)get_df(odf_name));
+        	if (odf != null) {
+        		odf.pull(data);
+                return;
+            }
+            
+            /* Reports the exception to IoTtalk*/
+            dan.push("Control", new JSONArray(){{
+            	put("UNKNOWN_ODF");
+            	put(new JSONObject(){{
+            		put("cmd_params", new JSONArray(){{
+            			put(odf_name);
+            		}});
+            	}});
+            }});
+        }
 	}
 	
-	static class IDACommand {
-		public String feature;
-		public double data;
-		
-		public IDACommand (String feature, double data) {
-			this.feature = feature;
-			this.data = data;
-		}
-		
-		public byte[] toBytes () {
-			byte[] ret = new byte[8 + feature.length()];
-			ByteBuffer byte_buffer = ByteBuffer.wrap(ret);
-			byte_buffer.putDouble(data);
-			byte_buffer.put(feature.getBytes());
-		    return ret;
-		}
-		
-		static public IDACommand fromBytes (byte[] bytes) {
-			ByteBuffer byte_buffer = ByteBuffer.wrap(bytes);
-			byte[] feature_bytes = new byte[bytes.length - 8];
-			double data = byte_buffer.getDouble();
-			byte_buffer.get(feature_bytes);
-			String feature = new String(feature_bytes);
-			return new IDACommand(feature, data);
-		}
-	}
-	
-	static class DANEventSubscriber extends DAN.Subscriber {
-		public void odf_handler (String feature, DAN.ODFObject odf_object) {
-			switch (odf_object.event) {
-			case FOUND_NEW_EC:
-			    if (!DAN.session_status()) {
-			        DAN.reregister(odf_object.message);
-			    }
-			    break;
-			case REGISTER_FAILED:
-				handle_error("Register failed: "+ odf_object.message);
-				break;
-			case REGISTER_SUCCEED:
-				//logging("Register successed: "+ odf_object.message);
-				final DAN.Subscriber odf_subscriber = new ODFSubscriber();
-				DAN.subscribe("Scale", odf_subscriber);
-				DAN.subscribe("Angle", odf_subscriber);
-				break;
-			default:
-				break;
-			}
-		}
-	}
-	
-	static class ODFSubscriber extends DAN.Subscriber {
-		@Override
-		public void odf_handler (String feature, DAN.ODFObject odf_object) {
-			logging("New data: "+ feature +", "+ odf_object.data.toString());
-			if(feature.equals("Scale")) {
-				IDACommand ida_command = new IDACommand("Scale", odf_object.data.getDouble(0));
-				dandelion_ida_manager.write(ida_command.toBytes());
-			} else if(feature.equals("Angle")) {
-				IDACommand ida_command = new IDACommand("Angle", odf_object.data.getDouble(0));
-				dandelion_ida_manager.write(ida_command.toBytes());
-			} else {
-				handle_error("Feature '"+ feature +"' not found");
-			}
-		}
-	}
 
-	static String mac_addr_cache = "";
-	static String get_mac_addr () {
-		if (!mac_addr_cache.equals("")) {
-			logging("Mac address cache: "+ mac_addr_cache);
-			return mac_addr_cache;
-		}
+    /* The main() function */
+    public static void main(String[] args) {
+        add_command(
+            new SET_DF_STATUS(),
+            new RESUME(),
+            new SUSPEND()
+        );
+        init_cmds();
+        init_dfs();
+        final JSONArray df_name_list = new JSONArray();
+        for(int i = 0; i < df_list.size(); i++) {
+            df_name_list.put(df_list.get(i).name);
+        }
+        JSONObject profile = new JSONObject() {{
+            put("d_name", d_name);
+            put("dm_name", "Bulb"); //deleted
+            put("u_name", u_name);
+            put("df_list", df_name_list);
+            put("is_sim", is_sim);
+        }};
+        dan.init("http://localhost:9999", d_id , profile, dai);
+        dai.add_shutdownhook();
 
-		InetAddress ip;
-		try {
-			ip = InetAddress.getLocalHost();
-			System.out.println("Current IP address : " + ip.getHostAddress());
-			NetworkInterface network = NetworkInterface.getByInetAddress(ip);
-			byte[] mac = network.getHardwareAddress();
-			mac_addr_cache += String.format("%02X", mac[0]);
-			for (int i = 1; i < mac.length; i++) {
-				mac_addr_cache += String.format(":%02X", mac[i]);
-			}
-			logging(mac_addr_cache);
-			return mac_addr_cache;
-		} catch (UnknownHostException e) {
-			e.printStackTrace();
-		} catch (SocketException e){
-			e.printStackTrace();
-		}
+        /* Performs the functionality of the IDA */
+        ida.iot_app();             
+    }
+    
+    /*--------------------------------------------------*/
+    /* Customizable part */
+    
+    static class Scale extends ODF {
+        public Scale () {
+            super("Scale");
+        }
+        @Override
+        public void pull(JSONArray data) {
+            IDA.write("Scale", (float)data.getDouble(0));
+        }
+    }
+    
+    /* Initialization of command list and DF list, generated by the DAC */
+    static void init_cmds () {
+        add_command(
+        //    new SAMPLE_COMMAND ()
+        );
+    }
+    static void init_dfs () {
+        add_df(
+    		new Scale()
+        );
+    }
+    
+    /* IDA Class */
+    public static class IDA extends PApplet {
+        static final int WINDOW_SIZE = 500;
+        
+        static final int BULB_RADIUS = WINDOW_SIZE / 4;
+        static final int BULB_DIAMETER = WINDOW_SIZE / 2;
+        static final int BULB_CENTER_X = WINDOW_SIZE / 2;
+        static final int BULB_CENTER_Y = (WINDOW_SIZE * 2) / 5;
+        
+        static final int BULB_BASE_WIDTH = BULB_DIAMETER / 5 * 2;
+        static final int BULB_BASE_HEIGHT = BULB_DIAMETER / 5 + BULB_DIAMETER / 25;
+        
+        static final int BULB_BASE_SPIRAL_WIDTH = BULB_RADIUS * 9 / 10;
+        static final int BULB_BASE_SPIRAL_WEIGHT = BULB_DIAMETER / 25 * 3 / 2;
+        static final int BULB_BASE_SPIRAL_EDGE_RAGUID = BULB_BASE_SPIRAL_WEIGHT / 2;
+        
+        static final int BULB_BASE_BOTTOM_HEIGHT = BULB_BASE_HEIGHT / 3;
+        
+        static final int BACKGROUND_COLOR = 20;
+        static final int BULB_GLASS_EDGE_COLOR = 200;
+        static final int BULB_GLASS_CENTER_COLOR = 255;
+        static final int BULB_BASE_COLOR = 180;
+        static final int BULB_BASE_SPIRAL_COLOR = 200;
+        static final int BULB_BASE_BOTTOM_COLOR = 70;
+        static final int DELAY = 8;
+        
+        static final String[] df_list = new String[]{"Scale"};
+        static final HashMap<String, Float> feature_map = new HashMap<String, Float>();
+        
+        float current_scale;
+        
+        static public void write (String feature, float para_data) {
+            if (!feature_map.containsKey(feature)) {
+                // error
+                return;
+            }
+            feature_map.put(feature, para_data);
+        }
 
-		logging("Mac address cache retriving failed, use random string");
-		Random rn = new Random();
-		for (int i = 0; i < 12; i++) {
-			int a = rn.nextInt(16);
-			mac_addr_cache += "0123456789abcdef".charAt(a);
-		}
-		return mac_addr_cache;
-	}
+        public void setup() {
+            size(WINDOW_SIZE, WINDOW_SIZE);
+            background(BACKGROUND_COLOR);
+            feature_map.put("Scale", 0f);
+            current_scale = 0;
+        }
 
-	static final String local_log_tag = "DAI";
-	static void logging (String message) {
-		String padding = message.startsWith(" ") || message.startsWith("[") ? "" : " ";
-		System.out.printf("[%s][%s]%s%s%n", dm_name, local_log_tag, padding, message);
-	}
-	
-	static void handle_error (String message) {
-		logging(message);
-	}
+        public void draw() {
+//            smooth();
+            stroke(0, 0);
+            noFill();
+            
+            current_scale += (feature_map.get("Scale") - current_scale) / DELAY;
 
+            for (int r = BULB_DIAMETER; r > 0; r--) {
+                float gradient_rate = pow((float) (BULB_DIAMETER - r) / BULB_DIAMETER, 0.25f);
+                float gray_level = (BULB_GLASS_CENTER_COLOR - BULB_GLASS_EDGE_COLOR) * gradient_rate + BULB_GLASS_EDGE_COLOR;
+                fill(gray_level, gray_level, gray_level * (1 - current_scale));
+                ellipse(BULB_CENTER_X, BULB_CENTER_Y, r, r);
+            }
+            
+            fill(BULB_BASE_COLOR);
+            rectMode(CENTER);
+            rect(
+                    BULB_CENTER_X, BULB_CENTER_Y + BULB_RADIUS + BULB_BASE_HEIGHT / 2,
+                    BULB_BASE_WIDTH, BULB_BASE_HEIGHT
+            );
+            
+            fill(BULB_BASE_SPIRAL_COLOR);
+            rect(
+                    BULB_CENTER_X, BULB_CENTER_Y + BULB_RADIUS,
+                    BULB_BASE_SPIRAL_WIDTH, BULB_BASE_SPIRAL_WEIGHT,
+                    BULB_BASE_SPIRAL_EDGE_RAGUID, BULB_BASE_SPIRAL_EDGE_RAGUID, BULB_BASE_SPIRAL_EDGE_RAGUID, BULB_BASE_SPIRAL_EDGE_RAGUID);
+            rect(
+                    BULB_CENTER_X, BULB_CENTER_Y + BULB_RADIUS + BULB_BASE_HEIGHT / 3,
+                    BULB_BASE_SPIRAL_WIDTH, BULB_BASE_SPIRAL_WEIGHT,
+                    BULB_BASE_SPIRAL_EDGE_RAGUID, BULB_BASE_SPIRAL_EDGE_RAGUID, BULB_BASE_SPIRAL_EDGE_RAGUID, BULB_BASE_SPIRAL_EDGE_RAGUID);
+            rect(
+                    BULB_CENTER_X, BULB_CENTER_Y + BULB_RADIUS + BULB_BASE_HEIGHT * 2 / 3,
+                    BULB_BASE_SPIRAL_WIDTH, BULB_BASE_SPIRAL_WEIGHT,
+                    BULB_BASE_SPIRAL_EDGE_RAGUID, BULB_BASE_SPIRAL_EDGE_RAGUID, BULB_BASE_SPIRAL_EDGE_RAGUID, BULB_BASE_SPIRAL_EDGE_RAGUID);
+            triangle(
+                    BULB_CENTER_X, BULB_CENTER_Y + BULB_RADIUS + BULB_BASE_HEIGHT + BULB_BASE_BOTTOM_HEIGHT,
+                    BULB_CENTER_X - BULB_BASE_WIDTH / 2, BULB_CENTER_Y + BULB_RADIUS + BULB_BASE_HEIGHT,
+                    BULB_CENTER_X + BULB_BASE_WIDTH / 2, BULB_CENTER_Y + BULB_RADIUS + BULB_BASE_HEIGHT
+            );
+            
+            fill(BULB_BASE_BOTTOM_COLOR);
+            arc(
+                    BULB_CENTER_X, BULB_CENTER_Y + BULB_RADIUS + BULB_BASE_HEIGHT + BULB_BASE_BOTTOM_HEIGHT * 2 / 3,
+                    BULB_BASE_WIDTH / 3, BULB_BASE_BOTTOM_HEIGHT * 2 / 3 + 1,
+                    0, PI, CHORD
+            );
+            //fill(128);
+            //stroke(128);
+            //rectMode(CENTER);
+            //rect(250,325,150,25);
+            //rect(250,340,100,25);
+            //rect(250,350,80,25);
+        }
+        
+        public void iot_app() {
+            PApplet.runSketch(new String[]{"Bulb"}, this);
+        };
+    }
 }
