@@ -48,6 +48,7 @@ public class DAI implements DAN.DAN2DAI {
     static ArrayList<Command> cmd_list = new ArrayList<Command>();
     static boolean suspended = true;
     static final String config_filename = "config.txt";
+    static String d_name = "";
     
     static void add_df (DF... dfs) {
         for (DF df: dfs) {
@@ -302,6 +303,7 @@ public class DAI implements DAN.DAN2DAI {
         }
 
         dan.init(dai, endpoint, d_id, profile);
+        d_name = profile.getString("d_name");
         dai.add_shutdownhook();
 
         /* Performs the functionality of the IDA */
@@ -435,7 +437,7 @@ public class DAI implements DAN.DAN2DAI {
         }
         
         public void iot_app() {
-            PApplet.runSketch(new String[]{"Bulb"}, this);
+            PApplet.runSketch(new String[]{d_name}, this);
         };
     }
 }
