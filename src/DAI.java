@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Random;
-
+import java.applet.Applet;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -314,13 +314,31 @@ public class DAI implements DAN.DAN2DAI {
     /* Customizable part */
     static String dm_name = "Bulb";
     
-    static class Scale extends ODF {
-        public Scale () {
-            super("Scale");
+    static class Luminance extends ODF {
+        public Luminance () {
+            super("Luminance");
         }
         @Override
         public void pull(JSONArray data) {
-            IDA.write("Scale", (float)data.getDouble(0));
+            IDA.write("Luminance", (float)data.getDouble(0));
+        }
+    }
+    
+    static class Color extends ODF {
+        public Color () {
+            super("Color-O");
+        }
+        public void pull(JSONArray data) {
+        	if(selected && !suspended) {
+        	    ida.color_r = (float) data.getDouble(0);
+        	    ida.color_g = (float) data.getDouble(1);
+        	    ida.color_b = (float) data.getDouble(2);
+        	}
+        	else {
+        		ida.color_r = 255f;
+        	    ida.color_g = 255f;
+        	    ida.color_b = 255f;
+        	}
         }
     }
     
@@ -332,7 +350,8 @@ public class DAI implements DAN.DAN2DAI {
     }
     static void init_dfs () {
         add_df(
-    		new Scale()
+    		new Luminance(),
+    		new Color()
         );
     }
     
@@ -362,11 +381,18 @@ public class DAI implements DAN.DAN2DAI {
         static final int BULB_BASE_BOTTOM_COLOR = 70;
         static final int DELAY = 8;
         
-        static final String[] df_list = new String[]{"Scale"};
+        static final String[] df_list = new String[]{"Luminance", "Color-O"};
         static final HashMap<String, Float> feature_map = new HashMap<String, Float>();
-        
+        public float color_b = 255f;
+		public float color_g = 255f;
+		public float color_r = 255f;
+		public float current_color_r;
+    	public float current_color_g;
+    	public float current_color_b;
+    	public float bulb_color_r;
+    	public float bulb_color_g;
+    	public float bulb_color_b;
         float current_scale;
-        
         static public void write (String feature, float para_data) {
             if (!feature_map.containsKey(feature)) {
                 // error
@@ -378,21 +404,26 @@ public class DAI implements DAN.DAN2DAI {
         public void setup() {
             size(WINDOW_SIZE, WINDOW_SIZE);
             background(BACKGROUND_COLOR);
-            feature_map.put("Scale", 0f);
+            feature_map.put("Luminance", 0f);
             current_scale = 0;
         }
 
         public void draw() {
 //            smooth();
             stroke(0, 0);
-            noFill();
-            
-            current_scale += (feature_map.get("Scale") - current_scale) / DELAY;
-
+            noFill();     
+            current_scale += (feature_map.get("Luminance") - current_scale) / DELAY;
+            current_color_r = approximate(current_color_r, color_r);
+        	current_color_g = approximate(current_color_g, color_g);
+        	current_color_b = approximate(current_color_b, color_b);
             for (int r = BULB_DIAMETER; r > 0; r--) {
                 float gradient_rate = pow((float) (BULB_DIAMETER - r) / BULB_DIAMETER, 0.25f);
                 float gray_level = (BULB_GLASS_CENTER_COLOR - BULB_GLASS_EDGE_COLOR) * gradient_rate + BULB_GLASS_EDGE_COLOR;
-                fill(gray_level, gray_level, gray_level * (1 - current_scale));
+                fill(gray_level, gray_level,gray_level * (1 - current_scale));
+                bulb_color_r = current_color_r *(current_scale/100)+ 255 *((100-current_scale)/100);
+                bulb_color_g = current_color_g *(current_scale/100)+ 255 *((100-current_scale)/100);
+                bulb_color_b = current_color_b *(current_scale/100)+ 255 *((100-current_scale)/100);
+                fill(bulb_color_r,bulb_color_g,bulb_color_b);
                 ellipse(BULB_CENTER_X, BULB_CENTER_Y, r, r);
             }
             
@@ -439,5 +470,9 @@ public class DAI implements DAN.DAN2DAI {
         public void iot_app() {
             PApplet.runSketch(new String[]{d_name}, this);
         };
+        
+        public float approximate (float source, float target) {
+    	    return source + (target - source) / 10;
+    	}
     }
 }
